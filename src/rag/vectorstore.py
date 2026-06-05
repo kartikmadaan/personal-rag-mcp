@@ -3,16 +3,16 @@ from contextlib import contextmanager
 import psycopg
 from pgvector.psycopg import register_vector
 
-
 DDL = """
 CREATE EXTENSION IF NOT EXISTS vector;
+DROP TABLE IF EXISTS chunks CASCADE;
 CREATE TABLE IF NOT EXISTS chunks (
    id BIGSERIAL PRIMARY KEY,
    source TEXT NOT NULL,
    chunk_id INT NOT NULL,
    text TEXT NOT NULL,
    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-   embedding vector(1536) NOT NULL,
+   embedding vector(384) NOT NULL,
    tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', text)) STORED
 );
 CREATE INDEX IF NOT EXISTS chunks_hnsw
@@ -21,29 +21,30 @@ CREATE INDEX IF NOT EXISTS chunks_tsv
    ON chunks USING gin (tsv);
 """
 
-
-
-
 @contextmanager
 def get_conn():
-   conn = psycopg.connect(os.environ["DATABASE_URL"].replace("+psycopg", ""))
+   # Strip the driver string if present
+   conn_str = os.environ["DATABASE_URL"].replace("+psycopg", "")
+   conn = psycopg.connect(conn_str)
+   
+   # We can safely register here because init_db() guarantees 
+   # the extension exists before any other function uses get_conn()
    register_vector(conn)
    try:
        yield conn
    finally:
        conn.close()
 
-
-
-
 def init_db() -> None:
-   with get_conn() as conn:
+   conn_str = os.environ["DATABASE_URL"].replace("+psycopg", "")
+   
+   # 1. Open a raw connection WITHOUT registering the vector type yet
+   with psycopg.connect(conn_str) as conn:
        with conn.cursor() as cur:
+           # 2. Run the DDL to create the extension and tables safely
            cur.execute(DDL)
        conn.commit()
-
-
-
+       print("Database initialized successfully with pgvector.")
 
 def upsert_chunks(rows: list[tuple[str, int, str, dict, list[float]]]) -> None:
    with get_conn() as conn:
