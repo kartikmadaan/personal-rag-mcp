@@ -3,7 +3,7 @@ from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 
 # OpenAI APIs are costly
-_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+#_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 # Local Model
 _model = SentenceTransformer("all-MiniLM-L6-v2")

@@ -147,4 +147,236 @@ CREATE INDEX IF NOT EXISTS chunks_tsv
 
 ## #5 - What this means for retrieval
 
-By creating both, pgvector is fully prepared for Hybrid Search with Reciprocal Rank Fusion (RRF). When a user asks a question, the pipeline will fire two ultra-fast queries simultaneously:The HNSW index retrieves chunks that match the concept of the question.The GIN index retrieves chunks that match the exact keywords or codes
+By creating both, pgvector is fully prepared for Hybrid Search with Reciprocal Rank Fusion (RRF). When a user asks a question, the pipeline will fire two ultra-fast queries simultaneously:
+
+The HNSW index retrieves chunks that match the concept of the question.
+
+The GIN index retrieves chunks that match the exact keywords or codes
+
+## #6 - Checking the retrieval 
+
+Below query compares the first valid chunk to 5 random chunks. The first entry is expected to be a perfect match (sample set is picked from DB). We expect there to be other relevant matches from DB because the chunks are a part of a coherent document.
+
+```sql
+rag=# WITH target_chunk AS (
+    -- Pick a random valid chunk that has an embedding
+    SELECT id, embedding 
+    FROM chunks 
+    WHERE embedding IS NULL = FALSE 
+    LIMIT 1
+)
+SELECT 
+    c.id, 
+    c.source, 
+    LEFT(c.text, 60) AS snippet,
+    -- Cosine distance (0 means identical, 2 means completely opposite)
+    (c.embedding <=> t.embedding) AS cosine_distance,
+    -- Cosine similarity (Your Python formula)
+    (1 - (c.embedding <=> t.embedding)) AS cosine_similarity
+FROM chunks c, target_chunk t
+ORDER BY cosine_distance ASC
+LIMIT 5;
+```
+
+```
+ id |           source           |                           snippet                            |   cosine_distance   | cosine_similarity  
+----+----------------------------+--------------------------------------------------------------+---------------------+--------------------
+  1 | corpus/SIGMOD21_Milvus.pdf | Milvus: A Purpose-Built Vector Data Management System       +|                   0 |                  1
+    |                            | Jiangu                                                       |                     | 
+  4 | corpus/SIGMOD21_Milvus.pdf | hao Zou, Jiquan Long, Yudong Cai, Zhenxiang Li, Zhifeng Zhan | 0.22916015299677084 | 0.7708398470032292
+  7 | corpus/SIGMOD21_Milvus.pdf | SIGMOD ’21, June 20–25, 2021, Virtual Event, China Wang et a |  0.3245069376683475 | 0.6754930623316525
+  9 | corpus/SIGMOD21_Milvus.pdf | -class                                                      +| 0.36638877887692356 | 0.6336112211230764
+    |                            | citizens. (1) Legacy database components such as opti        |                     | 
+  5 | corpus/SIGMOD21_Milvus.pdf |  approach in recommender                                    +|  0.3763400130373241 | 0.6236599869626759
+    |                            | systems is called vector embedding                           |                     | 
+(5 rows)
+```
+
+The output shows that self-similarity match for row 1 is as we expected. For the other 4 rows, the cosine distances are <1, this means that clustering is working as expected.
+
+`'<=>'` is the symbol used to compute the cosine distance b/w 2 rows. Cosine distance measures the angle b/w two vectors in the database completely ignoring how long the vectors are. What this means for us is that two phrases/sentences no matter how long each is are semantically similar if their cosine distance is less.
+
+cosine_distance = 1 - cosine_similarity
+cosine_similarity = (a.b)/(|a||b|) # Remember the dot product of vectors?
+0 indicates same direction = perfect match
+1 indicates orthogonal direction = unrelated
+2 indicates opposite direction = opposite
+```
+
+### Other pgvector operators
+
+- `<->` : This is the euclidean distance operator (straight line distance); best for image vectors or normalised embeddings
+- `<#>` : This is the negative inner product; faster to compute than cosine distance but used only if embeddings are normalised to 1.
+
+Below query searches using BM25
+
+```sql
+SELECT id, source, LEFT(text, 60) AS snippet,
+       ts_rank_cd(tsv, plainto_tsquery('english', 'Jianguo')) as rank
+FROM chunks 
+WHERE tsv @@ plainto_tsquery('english', 'Jianguo');
+```
+
+```sql
+rag=# SELECT id, source, LEFT(text, 60) AS snippet,
+       ts_rank_cd(tsv, plainto_tsquery('english', 'Jianguo')) as rank
+FROM chunks 
+WHERE tsv @@ plainto_tsquery('english', 'Jianguo');
+```
+
+```
+ id |           source           |                        snippet                        | rank 
+----+----------------------------+-------------------------------------------------------+------
+  1 | corpus/SIGMOD21_Milvus.pdf | Milvus: A Purpose-Built Vector Data Management System+|  0.1
+    |                            | Jiangu                                                | 
+  3 | corpus/SIGMOD21_Milvus.pdf | \x19 Database management system en-                  +|  0.1
+    |                            | gines; Data access methods;                           | 
+ 84 | corpus/SIGMOD21_Milvus.pdf | on Management of Data (SIGMOD) . 835–850.            +|  0.1
+    |                            | [39] Jie Li, Haife                                    | 
+ 90 | corpus/SIGMOD21_Milvus.pdf |  Fast Accurate Billion-                              +|  0.1
+    |                            | point Nearest Neighbor Search on a S                  | 
+(4 rows)
+```
+
+The output clearly shows matches across the document for 'Jianguo'
+
+## Running a dedicated re-ranking test (test_retrieval.py)
+
+### Query: How does Milvus handle vector data management and scalar filtering?
+
+```
+[Dense Top Hit] ID: 63 | Snippet: Milvus: A Purpose-Built Vector Data Management System SIGMOD...
+--- Stage 1: Top 5 Hybrid (RRF) Results ---
+Rank 1 | Chunk ID: 63 | RRF Score: 0.0164 | Snippet: Milvus: A Purpose-Built Vector Data Management Sys...
+Rank 2 | Chunk ID: 10 | RRF Score: 0.0161 | Snippet:  types such as vector similarity search with vario...
+Rank 3 | Chunk ID: 13 | RRF Score: 0.0159 | Snippet: Milvus: A Purpose-Built Vector Data Management Sys...
+Rank 4 | Chunk ID: 50 | RRF Score: 0.0156 | Snippet: .1 Asynchronous Processing
+Milvus is designed to m...
+Rank 5 | Chunk ID: 74 | RRF Score: 0.0154 | Snippet:  for billion-scale data and
+Vearch is significantl...
+
+--- Stage 2: Top 5 Reranked (Cross-Encoder) Results ---
+Rank 1 | Chunk ID: 10 | CE Score: 5.8672 | Snippet:  types such as vector similarity search with vario...
+Rank 2 | Chunk ID: 25 | CE Score: 4.4962 | Snippet: Milvus: A Purpose-Built Vector Data Management Sys...
+Rank 3 | Chunk ID: 11 | CE Score: 3.8902 | Snippet:  by hundreds of organiza-
+tions and institutions w...
+Rank 4 | Chunk ID: 2 | CE Score: 3.7277 | Snippet:  data. Milvus sup-
+ports easy-to-use application i...
+Rank 5 | Chunk ID: 13 | CE Score: 3.5555 | Snippet: Milvus: A Purpose-Built Vector Data Management Sys...
+```
+
+## Checking the entire pipeline
+
+```
+(.venv) kmadaan@Kartiks-Mac-mini personal-rag-mcp % python -c "from rag.pipeline import query; import json; print(json.dumps(query('what are deep neural networks?'), indent=2))"              
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights: 100%|██████████████| 103/103 [00:00<00:00, 8323.96it/s]
+Loading weights: 100%|██████████████| 105/105 [00:00<00:00, 6602.83it/s]
+{
+  "answer": "Deep neural networks refer to a type of neural network with multiple hidden layers, typically more than five layers [S3]. These networks have become popular due to their unprecedented success in various machine learning tasks [S3]. They are inspired by biological neural networks and have proven to work well for multiple use cases in image processing and recognition [S2].\n\nDeep neural networks can be used for a variety of tasks, including recognizing patterns, anomalies, and making predictions [S2]. Some popular architectures of deep neural networks include Convoluted Neural Networks (CNNs) [S2], which were developed by Yann LeCun and his associates in 1998.\n\nThe success of deep neural networks can be attributed to their ability to learn complex mappings from input to output spaces, making them useful for a wide range of applications in image analytics [S2]. However, there is still limited research on the theoretical perspective of deep neural networks, with only a few publications investigating their complexity and approximation properties [S3].\n\nReferences:\n[S1] E. Dahl, A. Mohamed, N. Jaitly, A. Senior, V . Vanhoucke, P. Nguyen,\nT. Sainath, and B. Kingsbury. Deep neural networks for acoustic modeling in speech recognition.\nIEEE Signal Processing Magazine, 29(6):82\u201397, Nov. 2012.\n[S2] source=corpus/White+paper+1+-+Introduction+to+Image+analytics.pdf\n<context>...</context>\n[S3] source=corpus/1402.1869v2.pdf\n<context>...</context>\n[S4] O. Krause, A. Fischer, T. Glasmachers, and C. Igel. Approximation properties of DBNs with binary\nhidden units and real-valued visible units. In Proceedings of The 30th International Conference\non Machine Learning (ICML\u20192013), 2013.\n[S5] source=corpus/1712.09913v3.pdf",
+  "citations": [
+    {
+      "id": "S1",
+      "source": "corpus/1402.1869v2.pdf"
+    },
+    {
+      "id": "S2",
+      "source": "corpus/White+paper+1+-+Introduction+to+Image+analytics.pdf"
+    },
+    {
+      "id": "S3",
+      "source": "corpus/1402.1869v2.pdf"
+    },
+    {
+      "id": "S4",
+      "source": "corpus/1402.1869v2.pdf"
+    },
+    {
+      "id": "S5",
+      "source": "corpus/1712.09913v3.pdf"
+    }
+  ],
+  "usage": {
+    "completion_tokens": 410,
+    "prompt_tokens": 1592,
+    "total_tokens": 2002,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": null
+  },
+  "latency_ms": 16701
+}
+```
+
+## Observations
+
+The model literally returned "<context>...</context>" as if it was copying a textbook definition. It got completely confiused with the template styling. This is the downside of using a local model rather than one from open AI/ Google.
+
+`"latency_ms": 16701` -> This is quite high because Ollama had to read the model weights from SSD to VRAM cache as this was a cold start.
+
+## Tweaks
+
+Adding this line to system prompt helped get rid of the XML tags -
+
+Never include raw strings like '<context>' or 'source=' inside your text.
+
+```json
+ "answer": "Deep neural networks are a type of neural network that has become increasingly popular due to their unprecedented success in various machine learning tasks [S3]. They consist of multiple layers of artificial neurons, inspired by the structure and function of biological neural networks. The key characteristic of deep neural networks is the presence of many layers, typically more than five, which allows them to learn complex representations of data.\n\nDeep neural networks are general function approximators, meaning they can be applied to a wide range of image and computer vision problems [S2]. They have been shown to excel in tasks such as recognizing patterns, anomalies, and making predictions. Some popular architectures of deep neural networks include Convoluted Neural Networks (CNNs), which were developed by Yann LeCun and his associates in 1998 [S2].\n\nThe success of deep neural networks can be attributed to their ability to learn complex mappings from input data to output space. This is achieved through the use of multiple layers, each with its own set of artificial neurons, which process and transform the input data in a hierarchical manner.\n\nIn recent years, there has been an increasing interest in understanding the theoretical properties of deep neural networks, including their approximation capabilities, complexity bounds, and optimization landscapes [S3, S4, S5]. Researchers have made significant progress in this area, developing new techniques and frameworks for analyzing and improving the performance of deep neural networks.\n\nOverall, deep neural networks have revolutionized the field of machine learning and image analytics, offering unparalleled success in a wide range of applications.",
+...
+"latency_ms": 13513
+```
+
+## Observations
+
+The latency is still high. For a mac mini, this should've taken around 2-3 seconds. 
+
+There are a couple of tweaks that are left - 
+
+1. Prompt caching in OLLAMA - Instead of running pipeline as a script, its better to run a persistent server sessions via MCP/ FAST API so that OLLAMA cache stays warm.
+2. Low VRAM Mode Check - OLLAMA is running in low vram mode
+3. No acceleration enabled in OLLAMA - Flash attention enablement will lead to a massive boost. "OLLAMA_FLASH_ATTENTION=true ollama serve"
+
+## API support via FAST API
+
+```
+(.venv) kmadaan@Kartiks-Mac-mini personal-rag-mcp % curl -s -X POST localhost:8088/query \
+ -H 'content-type: application/json' \
+ -d '{"q":"how does neural network work?","k":4}' | jq
+{
+  "answer": "To understand how neural networks work, we need to delve into the basics of these models.\n\nNeural Networks are general function approximations inspired by biological neural networks. They can be applied to any image and computer vision problem where the goal is to learn a complex mapping from input to output space (S1).\n\nThe top tasks that can be accomplished with neural networks include recognizing patterns, anomalies, and making predictions (S1). Convoluted Neural Networks (CNNs) are one of the most popular architectures used in image analytics. They were developed by Yann LeCun and his associates in 1998 and use back propagation in a feedforward net with multiple hidden layers, many maps of replicated units in each layer, and pooling the outputs of nearby replicated units (S1).\n\nHowever, understanding how neural networks work requires more than just knowing their architectures. Visualizations have been proposed to help answer questions about why neural networks work, such as minimizing highly non-convex neural loss functions and generalization properties (S2). The study explores how different network architecture choices affect the loss landscape and proposes a simple \"filter normalization\" scheme for side-by-side comparisons of different minima found during training.\n\nNeural networks have also been shown to be robust to quantization, meaning they can be quantized to lower bit-widths with relatively small impact on accuracy (S3). However, low-bit-width quantization introduces noise that can lead to a drop in accuracy. The study introduces the state-of-the-art in neural network quantization, discussing hardware and practical considerations, as well as two different regimes of quantizing neural networks: Post-Training Quantization (PTQ) and Quantization-Aware Training (QAT).\n\nIn terms of architecture, Convoluted Neural Networks (CNNs) are primarily used in image processing and classification but can also be used across other input types such as sound and audio. They involve convoluted layers instead of traditional normal layers, where not all nodes are connected to all nodes. These layers have a tendency to shrink when they become deeper. CNNs also involve pooling layers, such as max pooling, which filters out details and creates a downsampled feature map.\n\nRecurrent Neural Networks (RNNs) were originally introduced by Jeffrey Elman in 1990 and are basically perceptrons with connections between passes and through time. They combine two key properties: distributed hidden state that allows them to store information about the past efficiently, and non-linear dynamics that allow them to update their hidden state in a complicated manner.\n\nIn summary, neural networks work by learning complex mappings from input to output space through general function approximations inspired by biological neural networks. Understanding how they work requires knowledge of architectures such as CNNs and RNNs, as well as the principles behind quantization and visualization methods for loss functions.\n\nI don't know based on the provided context.",
+  "citations": [
+    {
+      "id": "S1",
+      "source": "corpus/White+paper+1+-+Introduction+to+Image+analytics.pdf"
+    },
+    {
+      "id": "S2",
+      "source": "corpus/1712.09913v3.pdf"
+    },
+    {
+      "id": "S3",
+      "source": "corpus/2106.08295v1.pdf"
+    },
+    {
+      "id": "S4",
+      "source": "corpus/White+paper+1+-+Introduction+to+Image+analytics.pdf"
+    }
+  ],
+  "usage": {
+    "completion_tokens": 579,
+    "prompt_tokens": 1630,
+    "total_tokens": 2209,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": null
+  },
+  "latency_ms": 21155
+}
+```
+
+## Observations
+
+The latency is still high. The reason for this seems to be prompt cache eviction. The tokens generated seem to be higher than the context window limit. 
+
+## Tweak 
+
+Increase the context memory (by sacrificing VRAM) so that the model can retain a larger cache.
+
