@@ -1,0 +1,15 @@
+---
+description: Route factual questions to the personal RAG MCP server
+alwaysApply: true
+---
+
+When the user asks a factual question that could be answered from their indexed corpus, always call the `search_knowledge_base` MCP tool on the personal-rag server before answering. Do not answer from general knowledge unless the tool returns no results or the user explicitly asks for a general explanation.
+
+Trigger phrases that mean "use my knowledge base":
+- "from my corpus"
+- "search my KB"
+- "via RAG"
+- "use my knowledge base"
+- "from my docs"
+
+No `@` or `/` prefix is needed — a short question plus any trigger phrase is enough.

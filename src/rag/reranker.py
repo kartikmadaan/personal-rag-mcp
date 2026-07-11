@@ -1,5 +1,7 @@
 from sentence_transformers import CrossEncoder
 
+from .retrieve import Hit
+
 
 _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 

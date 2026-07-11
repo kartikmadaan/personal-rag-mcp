@@ -142,6 +142,33 @@ curl -s -X POST localhost:8088/query \
 python -m rag.test_retrieval
 ```
 
+## Evaluation
+
+`scripts/eval.py` runs the pipeline against `evals/qa_set.jsonl` and scores the outputs with [RAGAS](https://docs.ragas.io/). The script first sends each question through `query()`, collecting the generated answer and the retrieved chunk texts. An evaluator LLM then grades those rows on three metrics:
+
+| Metric | What it measures |
+|---|---|
+| **Faithfulness** | Is the answer actually supported by the retrieved context? |
+| **Answer relevancy** | Does the answer address the question? |
+| **Context precision** | Were the retrieved chunks useful for producing the reference answer? |
+
+Use a local Ollama model for quick iteration, or Gemini if you have an API key and want more reliable structured scoring:
+
+```bash
+# local judge (llama3.2:3b via Ollama)
+python scripts/eval.py --evaluator local
+
+# Gemini judge — set GEMINI_API_KEY or GOOGLE_API_KEY first
+python scripts/eval.py --evaluator gemini
+
+# smoke test on two questions
+python scripts/eval.py --evaluator gemini --limit 2
+```
+
+On Gemini free tier, keep `--limit` low for first runs. The script uses one concurrent RAGAS worker and a 300s per-job timeout to stay inside rate limits.
+
+The QA set mixes corpus questions (Montúfar, Hornik, OpenVINO papers in `corpus/`) with repo-architecture questions (`chunker.py`, `retrieve.py`, etc.). Only the PDF corpus is ingested today, so architecture questions are expected to miss unless you add source code to the index.
+
 ## API
 
 ### `POST /query`
@@ -177,9 +204,11 @@ personal-rag-mcp/
 ├── corpus/                  # Sample PDFs + .gitkeep
 ├── docker-compose.yml       # pgvector Postgres on :5433
 ├── evals/
-│   └── attacks.jsonl        # Prompt-injection test cases
+│   ├── attacks.jsonl        # Prompt-injection test cases
+│   └── qa_set.jsonl         # RAGAS evaluation questions
 ├── scripts/
-│   └── ingest.py            # Corpus ingestion entrypoint
+│   ├── ingest.py            # Corpus ingestion entrypoint
+│   └── eval.py              # RAGAS evaluation harness
 ├── src/rag/
 │   ├── api.py               # FastAPI app
 │   ├── chunker.py           # Token-aware chunking
@@ -187,6 +216,7 @@ personal-rag-mcp/
 │   ├── generate.py          # Ollama-backed answer generation
 │   ├── guards.py            # Prompt-injection defenses
 │   ├── loaders.py           # PDF / md / txt / code loaders
+│   ├── mcp_server.py        # MCP stdio server
 │   ├── pipeline.py          # End-to-end query()
 │   ├── reranker.py          # Cross-encoder reranking
 │   ├── retrieve.py          # Dense + BM25 + RRF hybrid search
@@ -205,7 +235,7 @@ Retrieved context is wrapped in `<context>` blocks with explicit system-prompt r
 ## Roadmap
 
 - [ ] MCP server (`search_kb` tool for Cursor / Claude Desktop)
-- [ ] Eval harness (retrieval P@k, faithfulness, citation accuracy via Ragas)
+- [x] Eval harness (RAGAS faithfulness, answer relevancy, context precision)
 - [ ] Optional OpenAI / Anthropic backends for embeddings and generation
 - [ ] CI workflow and unit tests
 

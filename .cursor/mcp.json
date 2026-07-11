@@ -1,0 +1,13 @@
+{
+    "mcpServers": {
+      "personal-rag": {
+        "command": "/Users/kmadaan/Documents/Work/personal-rag-mcp/.venv/bin/python",
+        "args": ["-m", "rag.mcp_server"],
+        "cwd": "/Users/kmadaan/Documents/Work/personal-rag-mcp",
+        "env": {
+          "DATABASE_URL": "postgresql+psycopg://rag:rag@localhost:5433/rag",
+          "GENERATOR_MODEL": "llama3.2:3b"
+        }
+      }
+    }
+  }

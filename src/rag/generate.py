@@ -41,6 +41,9 @@ def generate(query: str, hits: list) -> dict:
    answer = resp.choices[0].message.content
    return {
        "answer": answer,
-       "citations": [{"id": f"S{i}", "source": h.source} for i, h in enumerate(hits, 1)],
+       "citations": [
+           {"id": f"S{i}", "source": h.source, "text": h.text}
+           for i, h in enumerate(hits, 1)
+       ],
        "usage": resp.usage.model_dump(),
    }
