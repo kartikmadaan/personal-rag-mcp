@@ -242,4 +242,4 @@ Retrieved context is wrapped in `<context>` blocks with explicit system-prompt r
 
 ## License
 
-MIT (or your preferred license—add one if publishing publicly).
+MIT
