@@ -238,6 +238,7 @@ Retrieved context is wrapped in `<context>` blocks with explicit system-prompt r
 - [x] Eval harness (RAGAS faithfulness, answer relevancy, context precision)
 - [ ] Optional OpenAI / Anthropic backends for embeddings and generation
 - [ ] CI workflow and unit tests
+- [ ] Running on a more powerful model for benchmarks (requires sponsorship)
 
 ## License
 
