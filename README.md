@@ -228,7 +228,7 @@ Returns `{"ok": true}`.
 ## Security & Regression Fixtures
 
 - **Input & Context Guards (`src/rag/guards.py`)** — Enforces query length bounds, rejects prompt-injection patterns (instruction overrides, role-switching, fake system markers), and strips control sequences from retrieved context blocks.
-- **Automated Tests (`tests/`)** — Run unit tests with `pytest`.
+- **Automated Tests (`tests/`)** — Run unit tests with `pytest` (or `pytest -m integration` against a running PostgreSQL + `pgvector` instance), lint with `ruff check src tests scripts`, and type-check with `mypy src tests`.
 - **Regression Fixtures (`evals/`)** — Contains adversarial prompt-injection test cases (`evals/attacks.jsonl`) and end-to-end retrieval/QA regression fixtures (`evals/qa_set.jsonl`, runnable via `scripts/eval.py` when `.[eval]` is installed).
 
 ## Project Layout
@@ -238,6 +238,8 @@ personal-rag-mcp/
 ├── .cursor/
 │   ├── mcp.json             # Cursor MCP server config template
 │   └── rules/search.mdc     # Cursor rule for routing KB queries
+├── .github/workflows/
+│   └── ci.yml               # Ruff, Mypy, Pytest unit & pgvector integration CI
 ├── corpus/                  # Local user documents directory (PDFs gitignored)
 ├── docker-compose.yml       # PostgreSQL 16 + pgvector on :5433
 ├── examples/                # Self-contained sample ADRs, runbooks & code
@@ -250,16 +252,22 @@ personal-rag-mcp/
 ├── src/rag/
 │   ├── api.py               # FastAPI HTTP service (/query, /healthz)
 │   ├── chunker.py           # Token-aware document splitter
-│   ├── embed.py             # Local SentenceTransformer embeddings
+│   ├── embed.py             # Lazy-loaded local SentenceTransformer embeddings
 │   ├── generate.py          # Grounded synthesis with inline citations
 │   ├── guards.py            # Prompt-injection & context sanitization guards
 │   ├── loaders.py           # Multi-format file loaders (md, code, txt, pdf)
 │   ├── mcp_server.py        # Model Context Protocol (MCP) stdio server
 │   ├── pipeline.py          # End-to-end retrieval + rerank + generation
-│   ├── reranker.py          # Cross-encoder candidate reranking
+│   ├── reranker.py          # Lazy-loaded Cross-Encoder candidate reranking
 │   ├── retrieve.py          # Dense HNSW + GIN lexical search + RRF fusion
 │   └── vectorstore.py       # pgvector schema, indexes, and batch upsert
 ├── tests/
+│   ├── test_api.py          # FastAPI /query and /healthz endpoint tests
+│   ├── test_chunker.py      # Token chunking boundary & overlap tests
+│   ├── test_guards.py       # Prompt-injection & context guard tests
+│   ├── test_integration.py  # Live PostgreSQL + pgvector integration tests
+│   ├── test_mcp_server.py   # MCP tool schema & dispatch tests
+│   ├── test_models.py       # Lazy model loading & DI tests
 │   └── test_retrieval.py    # Retrieval & RRF fusion test suite
 ├── analysis.md              # Retrieval & index inspection notes
 └── pyproject.toml
@@ -270,7 +278,7 @@ personal-rag-mcp/
 - [x] MCP server (`search_knowledge_base` stdio tool for Cursor, Claude Code, and Claude Desktop)
 - [x] Hybrid retrieval (pgvector HNSW + PostgreSQL GIN full-text search + RRF fusion + Cross-Encoder reranking)
 - [x] Regression harness & prompt-injection guardrails
-- [ ] Comprehensive unit test suite, lazy model loading, and GitHub Actions CI
+- [x] Comprehensive unit test suite, lazy model loading, and GitHub Actions CI
 - [ ] Incremental content-addressed ingestion (`SHA-256` change detection) & live file watching
 - [ ] Structure-aware Markdown & AST code chunking
 

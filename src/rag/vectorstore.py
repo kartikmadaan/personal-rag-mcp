@@ -1,5 +1,8 @@
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
+
 import psycopg
 from pgvector.psycopg import register_vector
 
@@ -35,7 +38,7 @@ def _get_database_url() -> str:
 
 
 @contextmanager
-def get_conn():
+def get_conn() -> Iterator[psycopg.Connection[Any]]:
     conn_str = _get_database_url()
     conn = psycopg.connect(conn_str)
 
@@ -60,7 +63,7 @@ def init_db() -> None:
         print("Database initialized successfully with pgvector.")
 
 
-def upsert_chunks(rows: list[tuple[str, int, str, dict, list[float]]]) -> None:
+def upsert_chunks(rows: list[tuple[str, int, str, Any, list[float]]]) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany(
@@ -69,3 +72,4 @@ def upsert_chunks(rows: list[tuple[str, int, str, dict, list[float]]]) -> None:
                 rows,
             )
         conn.commit()
+

@@ -23,6 +23,12 @@ def test_rrf_fuse_combines_dense_and_lexical_rankings() -> None:
     assert abs(fused[0].score - expected_chunk_2_score) < 1e-9
 
 
+def test_rrf_fuse_handles_empty_rankings() -> None:
+    assert rrf_fuse([]) == []
+    assert rrf_fuse([[], []]) == []
+
+
+
 def test_hybrid_search_merges_and_truncates_to_k_out() -> None:
     dense_hits = [
         Hit(chunk_id=10, source="a.md", text="alpha", score=0.9),
