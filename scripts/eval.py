@@ -17,17 +17,18 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="ragas")
 
 sys.path.insert(0, os.path.abspath("src"))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
-from datasets import Dataset
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
-from rag.pipeline import query
-from ragas import RunConfig, evaluate
-from ragas.metrics import context_precision, faithfulness
-from ragas.metrics._answer_relevance import AnswerRelevancy
+from datasets import Dataset  # noqa: E402
+from langchain_google_genai import ChatGoogleGenerativeAI  # noqa: E402
+from langchain_openai import ChatOpenAI  # noqa: E402
+from ragas import RunConfig, evaluate  # noqa: E402
+from ragas.metrics import context_precision, faithfulness  # noqa: E402
+from ragas.metrics._answer_relevance import AnswerRelevancy  # noqa: E402
+
+from rag.pipeline import query  # noqa: E402
 
 try:
     from langchain_huggingface import HuggingFaceEmbeddings

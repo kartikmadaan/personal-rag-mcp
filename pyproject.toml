@@ -24,7 +24,7 @@ dependencies = [
     "pypdf>=5.0",
     "unstructured[md]>=0.15",
     "sentence-transformers>=3.0",
-    "mcp>=1.0",
+    "mcp>=1.0,<2.0",
     "python-dotenv>=1.0",
 ]
 

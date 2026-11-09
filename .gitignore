@@ -1,5 +1,4 @@
 .env
-todo.txt
 corpus/*.pdf
 __pycache__/
 *.py[cod]
