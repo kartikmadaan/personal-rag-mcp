@@ -268,7 +268,7 @@ Rank 5 | Chunk ID: 13 | CE Score: 3.5555 | Snippet: Milvus: A Purpose-Built Vect
 ## Checking the entire pipeline
 
 ```
-(.venv) kmadaan@Kartiks-Mac-mini personal-rag-mcp % python -c "from rag.pipeline import query; import json; print(json.dumps(query('what are deep neural networks?'), indent=2))"              
+$ python -c "from rag.pipeline import query; import json; print(json.dumps(query('what are deep neural networks?'), indent=2))"
 Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
 Loading weights: 100%|██████████████| 103/103 [00:00<00:00, 8323.96it/s]
 Loading weights: 100%|██████████████| 105/105 [00:00<00:00, 6602.83it/s]
@@ -338,7 +338,7 @@ There are a couple of tweaks that are left -
 ## API support via FAST API
 
 ```
-(.venv) kmadaan@Kartiks-Mac-mini personal-rag-mcp % curl -s -X POST localhost:8088/query \
+$ curl -s -X POST localhost:8088/query \
  -H 'content-type: application/json' \
  -d '{"q":"how does neural network work?","k":4}' | jq
 {

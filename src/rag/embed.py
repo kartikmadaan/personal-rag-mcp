@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import os
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from sentence_transformers import SentenceTransformer
 
 
 @runtime_checkable
 class Embedder(Protocol):
-    def encode(self, texts: list[str], **kwargs: object) -> object: ...
+    def encode(self, texts: list[str], **kwargs: Any) -> Any: ...
 
 
 _model: Embedder | None = None
@@ -18,7 +18,7 @@ def get_embedder(model_name: str | None = None) -> Embedder:
     global _model
     if _model is None:
         resolved = model_name or os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-        _model = SentenceTransformer(resolved)
+        _model = cast(Embedder, SentenceTransformer(resolved))
     return _model
 
 
@@ -36,7 +36,7 @@ def embed_batch(
     model = embedder if embedder is not None else get_embedder()
     embeddings = model.encode(texts, batch_size=100, show_progress_bar=False)
     return [
-        embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)  # type: ignore[call-overload]
-        for embedding in embeddings  # type: ignore[attr-defined]
+        embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
+        for embedding in embeddings
     ]
 
