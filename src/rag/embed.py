@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from sentence_transformers import SentenceTransformer
 
@@ -18,7 +18,7 @@ def get_embedder(model_name: str | None = None) -> Embedder:
     global _model
     if _model is None:
         resolved = model_name or os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-        _model = SentenceTransformer(resolved)
+        _model = cast(Embedder, SentenceTransformer(resolved))
     return _model
 
 
