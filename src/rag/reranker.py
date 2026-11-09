@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from sentence_transformers import CrossEncoder
 
@@ -10,7 +10,7 @@ from .retrieve import Hit
 
 @runtime_checkable
 class Reranker(Protocol):
-    def predict(self, pairs: list[tuple[str, str]]) -> object: ...
+    def predict(self, pairs: list[tuple[str, str]]) -> Any: ...
 
 
 _reranker: Reranker | None = None
@@ -42,7 +42,7 @@ def rerank(
     model = reranker if reranker is not None else get_reranker()
     pairs = [(query, h.text) for h in hits]
     scores = model.predict(pairs)
-    for h, s in zip(hits, scores):  # type: ignore[arg-type]
+    for h, s in zip(hits, scores):
         h.score = float(s)
     return sorted(hits, key=lambda h: h.score, reverse=True)[:k]
 

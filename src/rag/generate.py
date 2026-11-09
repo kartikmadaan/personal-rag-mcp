@@ -43,12 +43,13 @@ def generate(query: str, hits: list[Any], client: OpenAI | None = None) -> dict[
     user = f"Question: {query}\n\n" + "\n\n".join(context_blocks)
 
     llm_client = client if client is not None else get_client()
+    messages: list[Any] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user},
+    ]
     resp = llm_client.chat.completions.create(
         model=os.getenv("GENERATOR_MODEL", "llama3.2:3b"),
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user},
-        ],
+        messages=messages,
         temperature=0.1,
     )
     answer = resp.choices[0].message.content
