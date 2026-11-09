@@ -1,11 +1,26 @@
+from __future__ import annotations
+
 import os
+from typing import Any
+
 from openai import OpenAI
 
+_client: OpenAI | None = None
 
-_client = OpenAI(
-    base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-    api_key=os.getenv("OLLAMA_API_KEY", "ollama-local"),
-)
+
+def get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        _client = OpenAI(
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+            api_key=os.getenv("OLLAMA_API_KEY", "ollama-local"),
+        )
+    return _client
+
+
+def set_client(client: OpenAI | None) -> None:
+    global _client
+    _client = client
 
 
 SYSTEM_PROMPT = """\
@@ -21,13 +36,14 @@ Rules:
 """
 
 
-def generate(query: str, hits: list) -> dict:
+def generate(query: str, hits: list[Any], client: OpenAI | None = None) -> dict[str, Any]:
     context_blocks = []
     for i, h in enumerate(hits, 1):
         context_blocks.append(f"[S{i}] source={h.source}\n<context>{h.text}</context>")
     user = f"Question: {query}\n\n" + "\n\n".join(context_blocks)
 
-    resp = _client.chat.completions.create(
+    llm_client = client if client is not None else get_client()
+    resp = llm_client.chat.completions.create(
         model=os.getenv("GENERATOR_MODEL", "llama3.2:3b"),
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -42,5 +58,6 @@ def generate(query: str, hits: list) -> dict:
             {"id": f"S{i}", "source": h.source, "text": h.text}
             for i, h in enumerate(hits, 1)
         ],
-        "usage": resp.usage.model_dump(),
+        "usage": resp.usage.model_dump() if resp.usage else {},
     }
+
