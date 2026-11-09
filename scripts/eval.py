@@ -7,18 +7,7 @@ import os
 import statistics
 import sys
 import time
-import types
 import warnings
-
-# Ragas pulls in langchain_community vertexai modules that aren't always installed.
-for mod_name, class_name in [
-    ("langchain_community.chat_models.vertexai", "ChatVertexAI"),
-    ("langchain_community.llms.vertexai", "VertexAI"),
-]:
-    if mod_name not in sys.modules:
-        stub = types.ModuleType(mod_name)
-        setattr(stub, class_name, type(class_name, (object,), {}))
-        sys.modules[mod_name] = stub
 
 os.environ.setdefault("LANGCHAIN_TRACING_V2", "false")
 for _var in ("LANGCHAIN_API_KEY", "LANGSMITH_API_KEY", "LANGCHAIN_ENDPOINT", "LANGCHAIN_PROJECT"):
@@ -63,9 +52,9 @@ def build_evaluator(evaluator: str, gemini_model: str):
         run_config = RunConfig(max_workers=1, timeout=300, max_wait=30)
     else:
         llm = ChatOpenAI(
-            model="llama3.2:3b",
-            base_url="http://localhost:11434/v1",
-            api_key="ollama",
+            model=os.getenv("GENERATOR_MODEL", "llama3.2:3b"),
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+            api_key=os.getenv("OLLAMA_API_KEY", "ollama-local"),
             model_kwargs={"response_format": {"type": "json_object"}},
             temperature=0.0,
         )
@@ -96,7 +85,9 @@ def run(qa_path: str, evaluator: str, limit: int | None, gemini_model: str) -> N
         })
 
     llm, run_config = build_evaluator(evaluator, gemini_model)
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings(
+        model_name=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    )
 
     print(f"scoring with ragas ({evaluator})...")
     metrics = [faithfulness, AnswerRelevancy(strictness=1), context_precision]

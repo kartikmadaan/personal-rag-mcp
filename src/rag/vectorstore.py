@@ -21,37 +21,51 @@ CREATE INDEX IF NOT EXISTS chunks_tsv
    ON chunks USING gin (tsv);
 """
 
+
+def _get_database_url() -> str:
+    raw = os.getenv("DATABASE_URL")
+    if raw:
+        return raw.replace("+psycopg", "")
+    user = os.getenv("POSTGRES_USER", "rag")
+    password = os.getenv("POSTGRES_PASSWORD", "rag")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5433")
+    db = os.getenv("POSTGRES_DB", "rag")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+
+
 @contextmanager
 def get_conn():
-   # Strip the driver string if present
-   conn_str = os.environ["DATABASE_URL"].replace("+psycopg", "")
-   conn = psycopg.connect(conn_str)
-   
-   # We can safely register here because init_db() guarantees 
-   # the extension exists before any other function uses get_conn()
-   register_vector(conn)
-   try:
-       yield conn
-   finally:
-       conn.close()
+    conn_str = _get_database_url()
+    conn = psycopg.connect(conn_str)
+
+    # We can safely register here because init_db() guarantees
+    # the extension exists before any other function uses get_conn()
+    register_vector(conn)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
 
 def init_db() -> None:
-   conn_str = os.environ["DATABASE_URL"].replace("+psycopg", "")
-   
-   # 1. Open a raw connection WITHOUT registering the vector type yet
-   with psycopg.connect(conn_str) as conn:
-       with conn.cursor() as cur:
-           # 2. Run the DDL to create the extension and tables safely
-           cur.execute(DDL)
-       conn.commit()
-       print("Database initialized successfully with pgvector.")
+    conn_str = _get_database_url()
+
+    # 1. Open a raw connection WITHOUT registering the vector type yet
+    with psycopg.connect(conn_str) as conn:
+        with conn.cursor() as cur:
+            # 2. Run the DDL to create the extension and tables safely
+            cur.execute(DDL)
+        conn.commit()
+        print("Database initialized successfully with pgvector.")
+
 
 def upsert_chunks(rows: list[tuple[str, int, str, dict, list[float]]]) -> None:
-   with get_conn() as conn:
-       with conn.cursor() as cur:
-           cur.executemany(
-               "INSERT INTO chunks (source, chunk_id, text, metadata, embedding) "
-               "VALUES (%s,%s,%s,%s,%s)",
-               rows,
-           )
-       conn.commit()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO chunks (source, chunk_id, text, metadata, embedding) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                rows,
+            )
+        conn.commit()

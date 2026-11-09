@@ -74,7 +74,13 @@ git clone <repo-url> personal-rag-mcp
 cd personal-rag-mcp
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]"
+```
+
+*(Optional)* To install the RAGAS regression evaluation dependencies:
+
+```bash
+pip install -e ".[eval]"
 ```
 
 ### 2. Configure environment
@@ -83,13 +89,20 @@ pip install -e .
 cp .env.example .env
 ```
 
-Key environment variables:
+Runtime environment variables (see [`.env.example`](.env.example)):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | `postgresql://rag:rag@localhost:5433/rag` | PostgreSQL connection string (required) |
+| `DATABASE_URL` | `postgresql://rag:rag@localhost:5433/rag` | PostgreSQL connection string |
+| `POSTGRES_USER` | `rag` | PostgreSQL user (used by `docker compose` and fallback DSN) |
+| `POSTGRES_PASSWORD` | `rag` | PostgreSQL password |
+| `POSTGRES_DB` | `rag` | PostgreSQL database name |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host |
+| `POSTGRES_PORT` | `5433` | Host port mapped to container port `5432` |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible local Ollama endpoint |
 | `GENERATOR_MODEL` | `llama3.2:3b` | Local Ollama model used for grounded synthesis |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Local SentenceTransformer embedding model |
+| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Local SentenceTransformer embedding model (384-dim) |
+| `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Local CrossEncoder reranking model |
 
 ### 3. Start PostgreSQL + pgvector
 
@@ -146,7 +159,7 @@ curl -s -X POST http://localhost:8088/query \
 
 ### Cursor / Claude Desktop Configuration
 
-Add the server to `.cursor/mcp.json` or `claude_desktop_config.json`:
+A template configuration is provided in [`.cursor/mcp.json`](.cursor/mcp.json). Replace `/absolute/path/to/personal-rag-mcp` with the absolute path to your local clone (returned by `pwd`):
 
 ```json
 {
@@ -157,7 +170,9 @@ Add the server to `.cursor/mcp.json` or `claude_desktop_config.json`:
       "cwd": "/absolute/path/to/personal-rag-mcp",
       "env": {
         "DATABASE_URL": "postgresql://rag:rag@localhost:5433/rag",
-        "GENERATOR_MODEL": "llama3.2:3b"
+        "OLLAMA_BASE_URL": "http://localhost:11434/v1",
+        "GENERATOR_MODEL": "llama3.2:3b",
+        "EMBEDDING_MODEL": "all-MiniLM-L6-v2"
       }
     }
   }
@@ -167,7 +182,7 @@ Add the server to `.cursor/mcp.json` or `claude_desktop_config.json`:
 ### Claude Code CLI
 
 ```bash
-claude mcp add personal-rag -- /absolute/path/to/personal-rag-mcp/.venv/bin/python -m rag.mcp_server
+claude mcp add personal-rag -- "$(pwd)/.venv/bin/python" -m rag.mcp_server
 ```
 
 ## HTTP API Reference
@@ -192,8 +207,6 @@ Response:
     {
       "id": "S1",
       "source": "examples/rate_limiter.py",
-      "chunk_id": 0,
-      "score": 4.812,
       "text": "..."
     }
   ],
@@ -214,13 +227,17 @@ Returns `{"ok": true}`.
 
 ## Security & Regression Fixtures
 
-- **Input & Context Guards (`src/rag/guards.py`)** — Enforces query length bounds, rejects prompt-injection patterns (instruction overrides, role-switching, fake system markers), and strips adversarial lines from retrieved context blocks before prompt construction.
-- **Regression Fixtures (`evals/`)** — Contains adversarial prompt-injection test cases (`evals/attacks.jsonl`) and end-to-end retrieval/QA regression fixtures (`evals/qa_set.jsonl`, runnable via `scripts/eval.py`).
+- **Input & Context Guards (`src/rag/guards.py`)** — Enforces query length bounds, rejects prompt-injection patterns (instruction overrides, role-switching, fake system markers), and strips control sequences from retrieved context blocks.
+- **Automated Tests (`tests/`)** — Run unit tests with `pytest`.
+- **Regression Fixtures (`evals/`)** — Contains adversarial prompt-injection test cases (`evals/attacks.jsonl`) and end-to-end retrieval/QA regression fixtures (`evals/qa_set.jsonl`, runnable via `scripts/eval.py` when `.[eval]` is installed).
 
 ## Project Layout
 
 ```
 personal-rag-mcp/
+├── .cursor/
+│   ├── mcp.json             # Cursor MCP server config template
+│   └── rules/search.mdc     # Cursor rule for routing KB queries
 ├── corpus/                  # Local user documents directory (PDFs gitignored)
 ├── docker-compose.yml       # PostgreSQL 16 + pgvector on :5433
 ├── examples/                # Self-contained sample ADRs, runbooks & code
@@ -229,7 +246,7 @@ personal-rag-mcp/
 │   └── qa_set.jsonl         # End-to-end QA benchmark fixtures
 ├── scripts/
 │   ├── ingest.py            # Directory ingestion CLI entrypoint
-│   └── eval.py              # Optional regression scoring script
+│   └── eval.py              # Optional RAGAS regression scoring script
 ├── src/rag/
 │   ├── api.py               # FastAPI HTTP service (/query, /healthz)
 │   ├── chunker.py           # Token-aware document splitter
@@ -242,9 +259,20 @@ personal-rag-mcp/
 │   ├── reranker.py          # Cross-encoder candidate reranking
 │   ├── retrieve.py          # Dense HNSW + GIN lexical search + RRF fusion
 │   └── vectorstore.py       # pgvector schema, indexes, and batch upsert
+├── tests/
+│   └── test_retrieval.py    # Retrieval & RRF fusion test suite
 ├── analysis.md              # Retrieval & index inspection notes
 └── pyproject.toml
 ```
+
+## Roadmap
+
+- [x] MCP server (`search_knowledge_base` stdio tool for Cursor, Claude Code, and Claude Desktop)
+- [x] Hybrid retrieval (pgvector HNSW + PostgreSQL GIN full-text search + RRF fusion + Cross-Encoder reranking)
+- [x] Regression harness & prompt-injection guardrails
+- [ ] Comprehensive unit test suite, lazy model loading, and GitHub Actions CI
+- [ ] Incremental content-addressed ingestion (`SHA-256` change detection) & live file watching
+- [ ] Structure-aware Markdown & AST code chunking
 
 ## License
 
