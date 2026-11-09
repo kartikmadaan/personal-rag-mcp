@@ -1,71 +1,71 @@
 # personal-rag-mcp
 
-A self-hosted **RAG (Retrieval-Augmented Generation)** pipeline that ingests your documents, indexes them with **hybrid retrieval** (PostgreSQL full-text search + dense embeddings, fused via RRF), reranks candidates with a cross-encoder, generates grounded answers with citations, and exposes the pipeline over a **FastAPI** HTTP API.
+A local-first **developer knowledge base and Model Context Protocol (MCP) server** backed by **PostgreSQL + pgvector**. Index your engineering notes, architecture decision records (ADRs), design docs, PDFs, and local source code, then query them directly from **Cursor**, **Claude Code**, **Claude Desktop**, or over an HTTP API.
 
-The long-term goal is to wrap this as an **MCP (Model Context Protocol)** server so Cursor, Claude Desktop, and other MCP clients can query your knowledge base conversationally. The retrieval and generation stack is in place; MCP integration is planned next.
+Unlike thin vector-only wrappers, `personal-rag-mcp` uses a two-stage **hybrid retrieval** pipeline—combining dense semantic search (`pgvector` HNSW) with lexical full-text search (PostgreSQL `tsvector` / GIN), fused via **Reciprocal Rank Fusion (RRF)** and reranked locally with a cross-encoder—so both conceptual questions and exact symbol/identifier lookups resolve accurately without leaving your machine.
 
-## Overview
+## Features
 
-This project is a systems-flavored RAG stack—not a thin wrapper around a single API call. It covers:
-
-- **Ingestion** — load PDFs, Markdown, plain text, and source code from a corpus directory
-- **Chunking** — token-aware splitting with overlap (tiktoken)
-- **Embedding** — local `all-MiniLM-L6-v2` vectors (384-dim) stored in **pgvector**
-- **Hybrid retrieval** — dense cosine search (HNSW index) + BM25-style keyword search (GIN/tsvector), merged with **Reciprocal Rank Fusion (RRF)**
-- **Reranking** — `cross-encoder/ms-marco-MiniLM-L-6-v2` cross-encoder
-- **Generation** — grounded answers with inline citations via **Ollama** (OpenAI-compatible API)
-- **Guardrails** — prompt-injection pattern detection on incoming queries
-- **HTTP API** — `POST /query` and `GET /healthz`
-
-A sample corpus of 10 ML/AI PDFs is included under `corpus/`. See [`analysis.md`](analysis.md) for a detailed walkthrough of the database schema, indexes, and retrieval behavior.
+- **MCP Server (`stdio`)** — Exposes `search_knowledge_base` to MCP-compatible coding clients (Cursor, Claude Code, Claude Desktop).
+- **Multi-Format Ingestion** — Loads Markdown (`.md`), plain text/reStructuredText (`.txt`, `.rst`), PDFs (`.pdf`), and source code (`.py`, `.ts`, `.js`, `.go`, `.cpp`, `.h`, `.java`).
+- **Token-Aware Chunking** — Splits documents with configurable token windows and overlap via `tiktoken`.
+- **Hybrid Retrieval (Dense + Lexical + RRF)** — Merges 384-dim `all-MiniLM-L6-v2` cosine similarity search (HNSW index) and PostgreSQL full-text search (GIN index) using Reciprocal Rank Fusion.
+- **Cross-Encoder Reranking** — Re-scores top candidate chunks locally with `cross-encoder/ms-marco-MiniLM-L-6-v2` before context assembly.
+- **Grounded Answers with Citations** — Generates answers with inline `[S1]`, `[S2]` source attributions via local **Ollama** models.
+- **Prompt-Injection Guardrails** — Screens incoming queries and retrieved context against injection patterns and instruction hijacking.
+- **FastAPI Service** — Exposes `POST /query` and `GET /healthz` for HTTP integrations and local scripting.
 
 ## Architecture
 
 ```
-                    ┌──────────────────────────────┐
-                    │  corpus/ (PDFs, md, code)    │
-                    └──────────────┬───────────────┘
-                                   │ ingest
+             ┌────────────────────────────────────────────┐
+             │  Local Files (Markdown, ADRs, Code, PDFs)  │
+             └─────────────────────┬──────────────────────┘
+                                   │ scripts/ingest.py
                                    ▼
-                    ┌──────────────────────────────┐
-                    │  loaders → chunker → embed     │
-                    └──────────────┬───────────────┘
-                                   │ store
+             ┌────────────────────────────────────────────┐
+             │     loaders  →  chunker  →  embedder       │
+             └─────────────────────┬──────────────────────┘
+                                   │ upsert
                                    ▼
-         ┌─────────────────────────┴─────────────────────────┐
-         │                                                   │
-         ▼                                                   ▼
+          ┌────────────────────────┴────────────────────────┐
+          │                    PostgreSQL                   │
+          ▼                                                 ▼
 ┌────────────────────┐                            ┌────────────────────┐
 │ pgvector (HNSW)    │                            │ PostgreSQL FTS     │
 │ cosine similarity  │                            │ (tsvector / GIN)   │
-└─────────┬──────────┘                            └──────────┬─────────┘
-          │                                                │
-          └──────────────────┬─────────────────────────────┘
-                             │ RRF fusion
-                             ▼
-                  ┌──────────────────────┐
-                  │  cross-encoder rerank │
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │  prompt-injection    │
-                  │  guard + Ollama LLM  │
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │  FastAPI  /query     │
-                  └──────────────────────┘
+└─────────┬──────────┘                            └─────────┬──────────┘
+          │                                                 │
+          └────────────────────────┬────────────────────────┘
+                                   │ Reciprocal Rank Fusion (RRF)
+                                   ▼
+                     ┌──────────────────────────┐
+                     │  Cross-Encoder Reranker  │
+                     └─────────────┬────────────┘
+                                   │
+                                   ▼
+                     ┌──────────────────────────┐
+                     │  Injection Guards + LLM  │
+                     │     (Local Ollama)       │
+                     └─────────────┬────────────┘
+                                   │
+                    ┌──────────────┴──────────────┐
+                    ▼                             ▼
+        ┌──────────────────────┐      ┌──────────────────────┐
+        │  MCP Server (stdio)  │      │  FastAPI (/query)    │
+        │ Cursor / Claude Code │      │  HTTP JSON Endpoint  │
+        └──────────────────────┘      └──────────────────────┘
 ```
+
+See [`analysis.md`](analysis.md) for a low-level walkthrough of the `pgvector` HNSW graph parameters, `tsvector` GIN index behavior, and two-stage reranking scores.
 
 ## Prerequisites
 
-- Python 3.11+
-- [Docker](https://docs.docker.com/get-docker/) (for Postgres + pgvector)
-- [Ollama](https://ollama.com/) running locally with a chat model pulled (default: `llama3.2:3b`)
+- **Python 3.11+**
+- **Docker** (for PostgreSQL 16 + `pgvector`)
+- **Ollama** running locally with a chat model pulled (default: `llama3.2:3b`)
 
-## Quick start
+## Quick Start
 
 ### 1. Clone and install
 
@@ -83,162 +83,168 @@ pip install -e .
 cp .env.example .env
 ```
 
-At minimum, set `DATABASE_URL`. Other keys are optional depending on which backends you use:
+Key environment variables:
 
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | Postgres connection string (required) |
-| `GENERATOR_MODEL` | Ollama model name (default: `llama3.2:3b`) |
-| `EMBEDDING_MODEL` | Reserved for OpenAI embeddings (currently unused; local model is default) |
-| `OPENAI_API_KEY` | Optional; OpenAI path is commented out in `embed.py` |
-| `LANGCHAIN_TRACING_V2` | Enable LangSmith tracing (optional) |
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://rag:rag@localhost:5433/rag` | PostgreSQL connection string (required) |
+| `GENERATOR_MODEL` | `llama3.2:3b` | Local Ollama model used for grounded synthesis |
+| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Local SentenceTransformer embedding model |
 
-### 3. Start the database
+### 3. Start PostgreSQL + pgvector
 
 ```bash
 docker compose up -d
 ```
 
-Postgres listens on **localhost:5433** with credentials `rag` / `rag`.
+PostgreSQL listens on **`localhost:5433`** with credentials `rag` / `rag`.
 
-### 4. Ingest the corpus
+### 4. Ingest sample docs or your own notes
+
+A self-contained [`examples/`](examples/) directory is included with sample architecture decision records, operational runbooks, and Python source code:
 
 ```bash
-python scripts/ingest.py corpus/
+python scripts/ingest.py examples/
 ```
 
-This creates the `chunks` table (with HNSW + GIN indexes), chunks all supported files, embeds them locally, and upserts rows into pgvector.
+To index your own notes, docs, or PDFs, drop them into `corpus/` (or pass any directory path):
 
-### 5. Start Ollama (if not already running)
+```bash
+python scripts/ingest.py /path/to/your/notes-or-repo
+```
+
+### 5. Start Ollama
 
 ```bash
 ollama pull llama3.2:3b
 ollama serve
 ```
 
-### 6. Run a query
+### 6. Query the Knowledge Base
 
-**Python:**
+**Via Python:**
 
 ```bash
-python -c "from rag.pipeline import query; import json; print(json.dumps(query('what are deep neural networks?'), indent=2))"
+python -c "from rag.pipeline import query; import json; print(json.dumps(query('Why did we choose hybrid RRF retrieval with pgvector?'), indent=2))"
 ```
 
-**HTTP API:**
+**Via HTTP API:**
 
 ```bash
 uvicorn rag.api:app --reload --port 8088
 ```
 
 ```bash
-curl -s -X POST localhost:8088/query \
+curl -s -X POST http://localhost:8088/query \
   -H 'content-type: application/json' \
-  -d '{"q":"how does neural network work?","k":4}' | jq
+  -d '{"q": "How does TokenBucketRateLimiter handle burst capacity?", "k": 4}' | jq
 ```
 
-**Retrieval-only smoke test:**
+## MCP Client Integration
 
-```bash
-python -m rag.test_retrieval
-```
+`src/rag/mcp_server.py` runs an MCP server over `stdio` and exposes the `search_knowledge_base` tool.
 
-## Evaluation
+### Cursor / Claude Desktop Configuration
 
-`scripts/eval.py` runs the pipeline against `evals/qa_set.jsonl` and scores the outputs with [RAGAS](https://docs.ragas.io/). The script first sends each question through `query()`, collecting the generated answer and the retrieved chunk texts. An evaluator LLM then grades those rows on three metrics:
-
-| Metric | What it measures |
-|---|---|
-| **Faithfulness** | Is the answer actually supported by the retrieved context? |
-| **Answer relevancy** | Does the answer address the question? |
-| **Context precision** | Were the retrieved chunks useful for producing the reference answer? |
-
-Use a local Ollama model for quick iteration, or Gemini if you have an API key and want more reliable structured scoring:
-
-```bash
-# local judge (llama3.2:3b via Ollama)
-python scripts/eval.py --evaluator local
-
-# Gemini judge — set GEMINI_API_KEY or GOOGLE_API_KEY first
-python scripts/eval.py --evaluator gemini
-
-# smoke test on two questions
-python scripts/eval.py --evaluator gemini --limit 2
-```
-
-On Gemini free tier, keep `--limit` low for first runs. The script uses one concurrent RAGAS worker and a 300s per-job timeout to stay inside rate limits.
-
-The QA set mixes corpus questions (Montúfar, Hornik, OpenVINO papers in `corpus/`) with repo-architecture questions (`chunker.py`, `retrieve.py`, etc.). Only the PDF corpus is ingested today, so architecture questions are expected to miss unless you add source code to the index.
-
-## API
-
-### `POST /query`
+Add the server to `.cursor/mcp.json` or `claude_desktop_config.json`:
 
 ```json
 {
-  "q": "your question",
+  "mcpServers": {
+    "personal-rag": {
+      "command": "/absolute/path/to/personal-rag-mcp/.venv/bin/python",
+      "args": ["-m", "rag.mcp_server"],
+      "cwd": "/absolute/path/to/personal-rag-mcp",
+      "env": {
+        "DATABASE_URL": "postgresql://rag:rag@localhost:5433/rag",
+        "GENERATOR_MODEL": "llama3.2:3b"
+      }
+    }
+  }
+}
+```
+
+### Claude Code CLI
+
+```bash
+claude mcp add personal-rag -- /absolute/path/to/personal-rag-mcp/.venv/bin/python -m rag.mcp_server
+```
+
+## HTTP API Reference
+
+### `POST /query`
+
+Request body:
+
+```json
+{
+  "q": "Where is TokenBucketRateLimiter implemented and how does acquire() work?",
   "k": 5
 }
 ```
 
-**Response:**
+Response:
 
 ```json
 {
-  "answer": "...",
-  "citations": [{"id": "S1", "source": "corpus/example.pdf"}],
-  "usage": { "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0 },
-  "latency_ms": 1234
+  "answer": "TokenBucketRateLimiter is implemented in examples/rate_limiter.py [S1]...",
+  "citations": [
+    {
+      "id": "S1",
+      "source": "examples/rate_limiter.py",
+      "chunk_id": 0,
+      "score": 4.812,
+      "text": "..."
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 640,
+    "completion_tokens": 142,
+    "total_tokens": 782
+  },
+  "latency_ms": 980
 }
 ```
 
-Malicious or injection-style queries are rejected with HTTP 400.
+Queries matching prompt-injection heuristics or exceeding length bounds return `HTTP 400`.
 
 ### `GET /healthz`
 
 Returns `{"ok": true}`.
 
-## Project layout
+## Security & Regression Fixtures
+
+- **Input & Context Guards (`src/rag/guards.py`)** — Enforces query length bounds, rejects prompt-injection patterns (instruction overrides, role-switching, fake system markers), and strips adversarial lines from retrieved context blocks before prompt construction.
+- **Regression Fixtures (`evals/`)** — Contains adversarial prompt-injection test cases (`evals/attacks.jsonl`) and end-to-end retrieval/QA regression fixtures (`evals/qa_set.jsonl`, runnable via `scripts/eval.py`).
+
+## Project Layout
 
 ```
 personal-rag-mcp/
-├── corpus/                  # Sample PDFs + .gitkeep
-├── docker-compose.yml       # pgvector Postgres on :5433
-├── evals/
-│   ├── attacks.jsonl        # Prompt-injection test cases
-│   └── qa_set.jsonl         # RAGAS evaluation questions
+├── corpus/                  # Local user documents directory (PDFs gitignored)
+├── docker-compose.yml       # PostgreSQL 16 + pgvector on :5433
+├── examples/                # Self-contained sample ADRs, runbooks & code
+├── evals/                   # Security & retrieval regression fixtures
+│   ├── attacks.jsonl        # Prompt-injection regression cases
+│   └── qa_set.jsonl         # End-to-end QA benchmark fixtures
 ├── scripts/
-│   ├── ingest.py            # Corpus ingestion entrypoint
-│   └── eval.py              # RAGAS evaluation harness
+│   ├── ingest.py            # Directory ingestion CLI entrypoint
+│   └── eval.py              # Optional regression scoring script
 ├── src/rag/
-│   ├── api.py               # FastAPI app
-│   ├── chunker.py           # Token-aware chunking
+│   ├── api.py               # FastAPI HTTP service (/query, /healthz)
+│   ├── chunker.py           # Token-aware document splitter
 │   ├── embed.py             # Local SentenceTransformer embeddings
-│   ├── generate.py          # Ollama-backed answer generation
-│   ├── guards.py            # Prompt-injection defenses
-│   ├── loaders.py           # PDF / md / txt / code loaders
-│   ├── mcp_server.py        # MCP stdio server
-│   ├── pipeline.py          # End-to-end query()
-│   ├── reranker.py          # Cross-encoder reranking
-│   ├── retrieve.py          # Dense + BM25 + RRF hybrid search
-│   ├── test_retrieval.py    # Retrieval pipeline smoke test
-│   └── vectorstore.py       # pgvector schema + upsert
-├── analysis.md              # Deep-dive on indexes and retrieval
+│   ├── generate.py          # Grounded synthesis with inline citations
+│   ├── guards.py            # Prompt-injection & context sanitization guards
+│   ├── loaders.py           # Multi-format file loaders (md, code, txt, pdf)
+│   ├── mcp_server.py        # Model Context Protocol (MCP) stdio server
+│   ├── pipeline.py          # End-to-end retrieval + rerank + generation
+│   ├── reranker.py          # Cross-encoder candidate reranking
+│   ├── retrieve.py          # Dense HNSW + GIN lexical search + RRF fusion
+│   └── vectorstore.py       # pgvector schema, indexes, and batch upsert
+├── analysis.md              # Retrieval & index inspection notes
 └── pyproject.toml
 ```
-
-## Security
-
-Incoming queries pass through `guards.py`, which blocks common prompt-injection patterns (e.g. "ignore previous instructions", fake system tags) and caps query length. Test cases live in `evals/attacks.jsonl`.
-
-Retrieved context is wrapped in `<context>` blocks with explicit system-prompt rules telling the LLM to treat injected instructions as data, not commands.
-
-## Roadmap
-
-- [ ] MCP server (`search_kb` tool for Cursor / Claude Desktop)
-- [x] Eval harness (RAGAS faithfulness, answer relevancy, context precision)
-- [ ] Optional OpenAI / Anthropic backends for embeddings and generation
-- [ ] CI workflow and unit tests
-- [ ] Running on a more powerful model for benchmarks (requires sponsorship)
 
 ## License
 
