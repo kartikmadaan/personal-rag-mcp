@@ -7,7 +7,7 @@ Unlike thin vector-only wrappers, `personal-rag-mcp` uses a two-stage **hybrid r
 ## Features
 
 - **MCP Server (`stdio`)** — Exposes `search_knowledge_base` to MCP-compatible coding clients (Cursor, Claude Code, Claude Desktop).
-- **Multi-Format Ingestion** — Loads Markdown (`.md`), plain text/reStructuredText (`.txt`, `.rst`), PDFs (`.pdf`), and source code (`.py`, `.ts`, `.js`, `.go`, `.cpp`, `.h`, `.java`).
+- **Multi-Format Incremental Ingestion** — Content-addressed (`SHA-256`) sync loads Markdown (`.md`), plain text/reStructuredText (`.txt`, `.rst`), PDFs (`.pdf`), and source code (`.py`, `.ts`, `.js`, `.go`, `.cpp`, `.h`, `.java`) while respecting `.gitignore` and `.ragignore` rules and supporting live file watching (`--watch`).
 - **Token-Aware Chunking** — Splits documents with configurable token windows and overlap via `tiktoken`.
 - **Hybrid Retrieval (Dense + Lexical + RRF)** — Merges 384-dim `all-MiniLM-L6-v2` cosine similarity search (HNSW index) and PostgreSQL full-text search (GIN index) using Reciprocal Rank Fusion.
 - **Cross-Encoder Reranking** — Re-scores top candidate chunks locally with `cross-encoder/ms-marco-MiniLM-L-6-v2` before context assembly.
@@ -124,6 +124,12 @@ To index your own notes, docs, or PDFs, drop them into `corpus/` (or pass any di
 
 ```bash
 python scripts/ingest.py /path/to/your/notes-or-repo
+```
+
+Re-running `scripts/ingest.py` is incremental and idempotent: unchanged files (matched by `SHA-256`) are skipped, modified files are re-embedded in a database transaction, and deleted files have their orphaned chunks pruned automatically. To continuously watch a directory for live updates:
+
+```bash
+python scripts/ingest.py --watch /path/to/your/notes-or-repo
 ```
 
 ### 5. Start Ollama
@@ -255,16 +261,18 @@ personal-rag-mcp/
 │   ├── embed.py             # Lazy-loaded local SentenceTransformer embeddings
 │   ├── generate.py          # Grounded synthesis with inline citations
 │   ├── guards.py            # Prompt-injection & context sanitization guards
-│   ├── loaders.py           # Multi-format file loaders (md, code, txt, pdf)
+│   ├── ingest.py            # Incremental directory sync & watchfiles watcher
+│   ├── loaders.py           # Multi-format file loaders with .gitignore/.ragignore
 │   ├── mcp_server.py        # Model Context Protocol (MCP) stdio server
 │   ├── pipeline.py          # End-to-end retrieval + rerank + generation
 │   ├── reranker.py          # Lazy-loaded Cross-Encoder candidate reranking
 │   ├── retrieve.py          # Dense HNSW + GIN lexical search + RRF fusion
-│   └── vectorstore.py       # pgvector schema, indexes, and batch upsert
+│   └── vectorstore.py       # pgvector schema, documents metadata & transactional sync
 ├── tests/
 │   ├── test_api.py          # FastAPI /query and /healthz endpoint tests
 │   ├── test_chunker.py      # Token chunking boundary & overlap tests
 │   ├── test_guards.py       # Prompt-injection & context guard tests
+│   ├── test_ingest.py       # Incremental sync, ignore rules & watcher tests
 │   ├── test_integration.py  # Live PostgreSQL + pgvector integration tests
 │   ├── test_mcp_server.py   # MCP tool schema & dispatch tests
 │   ├── test_models.py       # Lazy model loading & DI tests
@@ -279,7 +287,7 @@ personal-rag-mcp/
 - [x] Hybrid retrieval (pgvector HNSW + PostgreSQL GIN full-text search + RRF fusion + Cross-Encoder reranking)
 - [x] Regression harness & prompt-injection guardrails
 - [x] Comprehensive unit test suite, lazy model loading, and GitHub Actions CI
-- [ ] Incremental content-addressed ingestion (`SHA-256` change detection) & live file watching
+- [x] Incremental content-addressed ingestion (`SHA-256` change detection) & live file watching
 - [ ] Structure-aware Markdown & AST code chunking
 
 ## License
