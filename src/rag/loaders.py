@@ -8,7 +8,6 @@ import pathspec
 from langchain_community.document_loaders import (
     PyPDFLoader,
     TextLoader,
-    UnstructuredMarkdownLoader,
 )
 
 SUPPORTED_CODE_SUFFIXES: set[str] = {
@@ -18,7 +17,9 @@ SUPPORTED_CODE_SUFFIXES: set[str] = {
     ".h",
     ".java",
     ".ts",
+    ".tsx",
     ".js",
+    ".jsx",
 }
 SUPPORTED_PROSE_SUFFIXES: set[str] = {
     ".pdf",
@@ -190,9 +191,7 @@ def load_file(path: Path) -> list[RawDoc]:
 
     if suffix == ".pdf":
         docs = PyPDFLoader(str(path)).load()
-    elif suffix in {".md", ".markdown"}:
-        docs = UnstructuredMarkdownLoader(str(path)).load()
-    elif suffix in {".txt", ".rst"} | SUPPORTED_CODE_SUFFIXES:
+    elif suffix in {".md", ".markdown", ".txt", ".rst"} | SUPPORTED_CODE_SUFFIXES:
         docs = TextLoader(str(path), autodetect_encoding=True).load()
     else:
         return []
